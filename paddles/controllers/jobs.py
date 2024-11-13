@@ -1,11 +1,13 @@
 import logging
 from sqlalchemy.orm import load_only
+from sqlalchemy import desc
 
 from pecan import expose, abort, request
 
 from paddles import models
 from paddles.decorators import retryOperation
 from paddles.models import Job, rollback, Session
+from paddles.controllers.util import offset_query
 from paddles.controllers import error
 import paddles.controllers.runs
 
@@ -162,3 +164,38 @@ class JobsController(object):
     @expose('json')
     def _lookup(self, job_id, *remainder):
         return JobController(job_id), remainder
+
+class JobFilterController(object):
+    @expose('json')
+    def index(self, description='', status='', count=10, page=1):
+        """
+        Optimized job filter controller.
+        Limits search to the most recent `count` entries before applying filters.
+        """
+        # Step 1: Start with the base query for the latest jobs
+        job_query = Job.query.order_by(desc(Job.posted))
+
+        # Step 2: Apply description filter using ILIKE for case-insensitive matching
+        if description:
+            job_query = job_query.filter(Job.description == description)
+
+        # Step 3: Apply status filter if provided
+        if status:
+            job_query = job_query.filter_by(status=status)
+
+        # Step 4: Apply pagination (if needed)
+        job_query = offset_query(job_query, page_size=count, page=page)
+        jobs = job_query.all()
+
+        return jobs
+
+        # Step 5: Handle field selection, if specified
+        # if fields:
+        #     field_list = fields.split(',')
+        #     try:
+        #         return [{field: getattr(job, field) for field in field_list if hasattr(job, field)} for job in jobs]
+        #     except AttributeError:
+        #         rollback()
+        #         error('/errors/invalid/', 'An invalid field was specified')
+        # else:
+            # return jobs
